@@ -40,7 +40,7 @@ A Programozási technológiák (BPI1116L / BMI1303L) kurzus féléves beadandó 
 
 A minden függőséget tartalmazó önálló (fat) JAR fájl futtatása:
 
-    java -jar target/rush-hour-game-1.0-SNAPSHOT-jar-with-dependencies.jar
+    java -jar target/rush-hour-1.0-SNAPSHOT-jar-with-dependencies.jar
 
 🎮 Játékmenet és Parancsok:
 Indulás után a program bekéri a neved, majd betölti a pályát (ha létezik `board.txt` a gyökérben, abból, különben a beégetett alapértelmezett 6x12-es pályáról).

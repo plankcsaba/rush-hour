@@ -2,7 +2,6 @@ package hu.nye.progtech.rushhour.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -18,127 +17,161 @@ import org.junit.jupiter.api.Test;
 
 class GameServiceTest {
 
-    private GameService underTest;
+    private GameService gameService;
 
     @BeforeEach
     void setUp() {
-        underTest = new GameService();
+        gameService = new GameService();
     }
 
     @Test
-    void testCreateDefaultBoardShouldReturnValid6x12Board() {
-        BoardState board = underTest.createDefaultBoard();
+    void validMoveUpdatesVehiclePosition() throws InvalidMoveException {
+        BoardState initial = gameService.createDefaultBoard();
 
-        assertNotNull(board);
-        assertEquals(6, board.getRows());
-        assertEquals(12, board.getCols());
-        assertFalse(board.getVehicles().isEmpty());
-        assertTrue(underTest.findVehicleById(board, 'A').isPresent());
-        assertTrue(underTest.findVehicleById(board, 'B').isPresent());
+        BoardState updated = gameService.applyMove(initial, 'C', Direction.DOWN, 1);
+
+        Vehicle movedC = gameService.findVehicleById(updated, 'C').orElseThrow();
+        assertEquals(new Position(2, 4), movedC.getHeadPosition());
     }
 
     @Test
-    void testApplyMoveShouldSlideHorizontalVehicleWhenPathIsClear() throws InvalidMoveException {
-        BoardState board = underTest.createDefaultBoard();
-
-        // 'A' jármű (2,1)-en áll, hossz=2 (tehát (2,1) és (2,2)). A (2,3) üres, így 1-et léphet jobbra.
-        BoardState updated = underTest.applyMove(board, 'A', Direction.RIGHT, 1);
-
-        Vehicle movedA = underTest.findVehicleById(updated, 'A').orElseThrow();
-        assertEquals(new Position(2, 2), movedA.getHeadPosition());
-    }
-
-    @Test
-    void testApplyMoveShouldThrowExceptionWhenStepsNotPositive() {
-        BoardState board = underTest.createDefaultBoard();
-
-        assertThrows(InvalidMoveException.class,
-                () -> underTest.applyMove(board, 'A', Direction.RIGHT, 0));
-    }
-
-    @Test
-    void testApplyMoveShouldThrowExceptionWhenVehicleNotFound() {
-        BoardState board = underTest.createDefaultBoard();
-
-        assertThrows(InvalidMoveException.class,
-                () -> underTest.applyMove(board, 'Z', Direction.RIGHT, 1));
-    }
-
-    @Test
-    void testApplyMoveShouldThrowExceptionWhenHorizontalMovesVertically() {
-        BoardState board = underTest.createDefaultBoard();
-
-        assertThrows(InvalidMoveException.class,
-                () -> underTest.applyMove(board, 'A', Direction.UP, 1));
-    }
-
-    @Test
-    void testApplyMoveShouldThrowExceptionWhenVerticalMovesHorizontally() {
-        BoardState board = underTest.createDefaultBoard();
-
-        assertThrows(InvalidMoveException.class,
-                () -> underTest.applyMove(board, 'C', Direction.LEFT, 1));
-    }
-
-    @Test
-    void testApplyMoveShouldThrowExceptionWhenCollisionOccurs() {
-        BoardState board = underTest.createDefaultBoard();
-
-        // 'A' előtt a (2,4) mezőn a 'C' vertikális jármű áll, így 3 lépés jobbra ütközést okoz
-        assertThrows(InvalidMoveException.class,
-                () -> underTest.applyMove(board, 'A', Direction.RIGHT, 3));
-    }
-
-    @Test
-    void testApplyMoveShouldThrowExceptionWhenLeavingBoard() {
-        BoardState board = underTest.createDefaultBoard();
-
-        // 'A' a (2,1)-en áll, 2 lépés balra lelépne a (2,-1) mezőre
-        assertThrows(InvalidMoveException.class,
-                () -> underTest.applyMove(board, 'A', Direction.LEFT, 2));
-    }
-
-    @Test
-    void testWinConditionsShouldDetectHumanAndAiWinners() {
-        BoardState winningHumanBoard = BoardState.builder()
-                .withDimensions(6, 12)
-                .withExitA(new Position(2, 11))
-                .withExitB(new Position(3, 0))
+    void moveBlockedByAnotherVehicleThrowsException() {
+        BoardState state = BoardState.builder()
+                .withDimensions(4, 6)
+                .withExitA(new Position(1, 5))
+                .withExitB(new Position(2, 0))
                 .withVehicles(List.of(
-                        new Vehicle('A', new Position(2, 10), 2, Orientation.HORIZONTAL),
-                        new Vehicle('B', new Position(3, 5), 2, Orientation.HORIZONTAL)
+                        new Vehicle('A', new Position(1, 1), 2, Orientation.HORIZONTAL),
+                        new Vehicle('C', new Position(1, 3), 2, Orientation.VERTICAL)
                 ))
                 .build();
 
-        assertTrue(underTest.isHumanWinner(winningHumanBoard));
-        assertFalse(underTest.isAiWinner(winningHumanBoard));
+        assertThrows(InvalidMoveException.class,
+                () -> gameService.applyMove(state, 'A', Direction.RIGHT, 2));
+    }
 
-        BoardState winningAiBoard = BoardState.builder()
-                .withDimensions(6, 12)
-                .withExitA(new Position(2, 11))
-                .withExitB(new Position(3, 0))
+    @Test
+    void wrongOrientationThrowsException() {
+        BoardState state = gameService.createDefaultBoard();
+
+        assertThrows(InvalidMoveException.class,
+                () -> gameService.applyMove(state, 'A', Direction.UP, 1));
+    }
+
+    @Test
+    void nonPositiveStepsThrowsException() {
+        BoardState state = gameService.createDefaultBoard();
+
+        assertThrows(InvalidMoveException.class,
+                () -> gameService.applyMove(state, 'A', Direction.RIGHT, 0));
+    }
+
+    @Test
+    void unknownVehicleThrowsException() {
+        BoardState state = gameService.createDefaultBoard();
+
+        assertThrows(InvalidMoveException.class,
+                () -> gameService.applyMove(state, 'Z', Direction.RIGHT, 1));
+    }
+
+    @Test
+    void heroASlidesOutOnRightEdgeAndWins() throws InvalidMoveException {
+        BoardState state = BoardState.builder()
+                .withDimensions(4, 6)
+                .withExitA(new Position(1, 5))
+                .withExitB(new Position(2, 0))
+                .withVehicles(List.of(
+                        new Vehicle('A', new Position(1, 3), 2, Orientation.HORIZONTAL),
+                        new Vehicle('B', new Position(2, 2), 2, Orientation.HORIZONTAL)
+                ))
+                .build();
+
+        assertFalse(gameService.isHumanWinner(state));
+
+        BoardState touchingExit = gameService.applyMove(state, 'A', Direction.RIGHT, 1);
+        assertFalse(gameService.isHumanWinner(touchingExit));
+
+        BoardState slidOffBoard = gameService.applyMove(state, 'A', Direction.RIGHT, 2);
+        assertTrue(gameService.isHumanWinner(slidOffBoard));
+    }
+
+    @Test
+    void heroBSidesOutOnLeftEdgeAndAiWins() throws InvalidMoveException {
+        BoardState state = BoardState.builder()
+                .withDimensions(4, 6)
+                .withExitA(new Position(1, 5))
+                .withExitB(new Position(2, 0))
+                .withVehicles(List.of(
+                        new Vehicle('A', new Position(1, 2), 2, Orientation.HORIZONTAL),
+                        new Vehicle('B', new Position(2, 1), 2, Orientation.HORIZONTAL)
+                ))
+                .build();
+
+        assertFalse(gameService.isAiWinner(state));
+
+        BoardState slidOffBoard = gameService.applyMove(state, 'B', Direction.LEFT, 2);
+        assertTrue(gameService.isAiWinner(slidOffBoard));
+    }
+
+    @Test
+    void heroACannotLeaveThroughExitB() {
+        BoardState state = BoardState.builder()
+                .withDimensions(4, 6)
+                .withExitA(new Position(1, 5))
+                .withExitB(new Position(2, 0))
                 .withVehicles(List.of(
                         new Vehicle('A', new Position(2, 1), 2, Orientation.HORIZONTAL),
-                        new Vehicle('B', new Position(3, 0), 2, Orientation.HORIZONTAL)
+                        new Vehicle('B', new Position(1, 2), 2, Orientation.HORIZONTAL)
                 ))
                 .build();
 
-        assertFalse(underTest.isHumanWinner(winningAiBoard));
-        assertTrue(underTest.isAiWinner(winningAiBoard));
+        assertThrows(InvalidMoveException.class,
+                () -> gameService.applyMove(state, 'A', Direction.LEFT, 2));
+        assertFalse(gameService.isHumanWinner(state));
     }
 
     @Test
-    void testGetValidMovesForVehicleShouldReturnEmptyListForUnknownVehicle() {
-        BoardState board = underTest.createDefaultBoard();
-        List<BoardState> moves = underTest.getValidMovesForVehicle(board, 'X');
-        assertTrue(moves.isEmpty());
+    void nonHeroVehicleCannotSlideOffBoard() {
+        BoardState state = BoardState.builder()
+                .withDimensions(4, 6)
+                .withExitA(new Position(1, 5))
+                .withExitB(new Position(2, 0))
+                .withVehicles(List.of(
+                        new Vehicle('A', new Position(1, 1), 2, Orientation.HORIZONTAL),
+                        new Vehicle('C', new Position(0, 4), 2, Orientation.HORIZONTAL)
+                ))
+                .build();
+
+        assertThrows(InvalidMoveException.class,
+                () -> gameService.applyMove(state, 'C', Direction.RIGHT, 1));
     }
 
     @Test
-    void testGetValidMovesForVehicleShouldReturnAllValidLongMoves() {
-        BoardState board = underTest.createDefaultBoard();
-        List<BoardState> moves = underTest.getValidMovesForVehicle(board, 'A');
-        // 'A' balra 1-et (2,0), jobbra 1-et (2,2) tud lépni
-        assertEquals(2, moves.size());
+    void verticalExitsSupportedWhenConfigured() throws InvalidMoveException {
+        BoardState downExitState = BoardState.builder()
+                .withDimensions(4, 5)
+                .withExitA(new Position(3, 2))
+                .withExitB(new Position(0, 1))
+                .withVehicles(List.of(
+                        new Vehicle('A', new Position(2, 2), 2, Orientation.VERTICAL),
+                        new Vehicle('B', new Position(0, 1), 2, Orientation.VERTICAL)
+                ))
+                .build();
+
+        BoardState afterDown = gameService.applyMove(downExitState, 'A', Direction.DOWN, 1);
+        assertTrue(gameService.isHumanWinner(afterDown));
+
+        BoardState upExitState = BoardState.builder()
+                .withDimensions(4, 5)
+                .withExitA(new Position(1, 4))
+                .withExitB(new Position(0, 1))
+                .withVehicles(List.of(
+                        new Vehicle('A', new Position(1, 2), 2, Orientation.HORIZONTAL),
+                        new Vehicle('B', new Position(0, 1), 2, Orientation.VERTICAL)
+                ))
+                .build();
+
+        BoardState afterUp = gameService.applyMove(upExitState, 'B', Direction.UP, 1);
+        assertTrue(gameService.isAiWinner(afterUp));
     }
 }

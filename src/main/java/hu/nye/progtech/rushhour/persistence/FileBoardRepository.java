@@ -77,7 +77,7 @@ public class FileBoardRepository {
             writer.newLine();
             writer.write(state.getExitB().getRow() + " " + state.getExitB().getCol());
             writer.newLine();
-            writer.write(String.valueOf(state.getVehicles().size()));
+            writer.write(state.getVehicles().size());
             writer.newLine();
             for (Vehicle vehicle : state.getVehicles()) {
                 writer.write(vehicle.getId()

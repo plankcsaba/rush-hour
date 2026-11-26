@@ -20,20 +20,20 @@ import org.slf4j.LoggerFactory;
 public class GameService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(GameService.class);
+
     public static final char HUMAN_HERO_ID = 'A';
     public static final char AI_HERO_ID = 'B';
 
     /**
-     * Létrehozza a beégetett (default) 6x12-es kezdőpályát, ha nem áll rendelkezésre bemeneti fájl.
+     * Létrehozza az alapértelmezett 6x12-es kezdő táblaállapotot.
+     *
+     * @return az alapértelmezett {@link BoardState}
      */
     public BoardState createDefaultBoard() {
         LOGGER.info("Alapértelmezett (default) 6x12-es pálya létrehozása.");
         List<Vehicle> defaultVehicles = List.of(
-                // Humán játékos céljárműve (A) - 3-as sor (index 2), bal oldalon indul, célja a jobb szél (2, 11)
                 new Vehicle(HUMAN_HERO_ID, new Position(2, 1), 2, Orientation.HORIZONTAL),
-                // Gépi játékos céljárműve (B) - 4-es sor (index 3), jobb oldalon indul, célja a bal szél (3, 0)
                 new Vehicle(AI_HERO_ID, new Position(3, 9), 2, Orientation.HORIZONTAL),
-                // Semleges akadályok (C, D, E, F, G, H)
                 new Vehicle('C', new Position(1, 4), 3, Orientation.VERTICAL),
                 new Vehicle('D', new Position(2, 7), 3, Orientation.VERTICAL),
                 new Vehicle('E', new Position(0, 2), 2, Orientation.HORIZONTAL),
@@ -51,7 +51,11 @@ public class GameService {
     }
 
     /**
-     * Megkeres egy járművet az azonosítója alapján Stream API segítségével.
+     * Megkeres egy járművet a táblán az azonosítója alapján.
+     *
+     * @param state     az aktuális táblaállapot
+     * @param vehicleId a keresett jármű azonosítója
+     * @return a megtalált jármű {@link Optional}-ban
      */
     public Optional<Vehicle> findVehicleById(BoardState state, char vehicleId) {
         char upperId = Character.toUpperCase(vehicleId);
@@ -61,9 +65,36 @@ public class GameService {
     }
 
     /**
-     * Végrehajt egy csúsztatási lépést a megadott járművel, irányban és lépésszámmal.
+     * Ellenőrzi, hogy egy adott pozíció a tábla belső határain belül van-e.
+     *
+     * @param state az aktuális táblaállapot
+     * @param pos   a vizsgált pozíció
+     * @return {@code true}, ha a pozíció a táblán belül van
+     */
+    public boolean isWithinBounds(BoardState state, Position pos) {
+        return pos.getRow() >= 0 && pos.getRow() < state.getRows()
+                && pos.getCol() >= 0 && pos.getCol() < state.getCols();
+    }
+
+    /**
+     * Végrehajt és validál egy lépést a táblán, majd visszaadja az új {@link BoardState}-et.
+     *
+     * @param state     az aktuális táblaállapot
+     * @param vehicleId a mozgatandó jármű azonosítója
+     * @param direction a lépés iránya
+     * @param steps     a lépések száma
+     * @return az új táblaállapot
+     * @throws InvalidMoveException ha a lépés szabálytalan
      */
     public BoardState applyMove(BoardState state, char vehicleId, Direction direction, int steps)
+            throws InvalidMoveException {
+        BoardState nextState = simulateMove(state, vehicleId, direction, steps);
+        LOGGER.info("Lépés végrehajtva: jármű={}, irány={}, lépésszám={}",
+                Character.toUpperCase(vehicleId), direction, steps);
+        return nextState;
+    }
+
+    private BoardState simulateMove(BoardState state, char vehicleId, Direction direction, int steps)
             throws InvalidMoveException {
         if (steps <= 0) {
             throw new InvalidMoveException("A lépésszámnak pozitív egész számnak kell lennie!");
@@ -74,32 +105,29 @@ public class GameService {
 
         validateOrientation(vehicle, direction);
 
-        // Az összes többi jármű által elfoglalt mező kigyűjtése Stream API-val
         Set<Position> occupiedByOthers = state.getVehicles().stream()
                 .filter(v -> v.getId() != vehicle.getId())
                 .flatMap(v -> v.getOccupiedPositions().stream())
                 .collect(Collectors.toSet());
 
-        // Útvonal ellenőrzése lépésről lépésre (nem ugorhat át más járművet és nem léphet le a tábláról)
         for (int step = 1; step <= steps; step++) {
             Vehicle intermediate = vehicle.withMovedPosition(direction, step);
             for (Position pos : intermediate.getOccupiedPositions()) {
-                if (!isWithinBounds(state, pos)) {
-                    throw new InvalidMoveException("A jármű nem léphet le a játéktábláról!");
-                }
                 if (occupiedByOthers.contains(pos)) {
                     throw new InvalidMoveException("Az út nem szabad! Egy másik jármű útban van a(z) "
                             + pos + " mezőn.");
+                }
+                if (!isWithinBounds(state, pos) && !canExitThroughOwnExit(state, vehicle, direction, pos)) {
+                    throw new InvalidMoveException("A jármű nem léphet le a játéktábláról ezen a ponton: " + pos);
                 }
             }
         }
 
         Vehicle movedVehicle = vehicle.withMovedPosition(direction, steps);
+
         List<Vehicle> updatedVehicles = state.getVehicles().stream()
                 .map(v -> v.getId() == vehicle.getId() ? movedVehicle : v)
                 .toList();
-
-        LOGGER.info("Lépés végrehajtva: jármű={}, irány={}, lépésszám={}", vehicle.getId(), direction, steps);
 
         return BoardState.builder()
                 .withDimensions(state.getRows(), state.getCols())
@@ -107,6 +135,37 @@ public class GameService {
                 .withExitB(state.getExitB())
                 .withVehicles(updatedVehicles)
                 .build();
+    }
+
+    private boolean canExitThroughOwnExit(BoardState state, Vehicle vehicle, Direction direction, Position offBoardPos) {
+        char upperId = Character.toUpperCase(vehicle.getId());
+        Position ownExit;
+        if (upperId == HUMAN_HERO_ID) {
+            ownExit = state.getExitA();
+        } else if (upperId == AI_HERO_ID) {
+            ownExit = state.getExitB();
+        } else {
+            return false;
+        }
+
+        if (ownExit == null || !isWithinBounds(state, ownExit)) {
+            return false;
+        }
+
+        return switch (direction) {
+            case RIGHT -> ownExit.getCol() == state.getCols() - 1
+                    && offBoardPos.getRow() == ownExit.getRow()
+                    && offBoardPos.getCol() >= state.getCols();
+            case LEFT -> ownExit.getCol() == 0
+                    && offBoardPos.getRow() == ownExit.getRow()
+                    && offBoardPos.getCol() < 0;
+            case DOWN -> ownExit.getRow() == state.getRows() - 1
+                    && offBoardPos.getCol() == ownExit.getCol()
+                    && offBoardPos.getRow() >= state.getRows();
+            case UP -> ownExit.getRow() == 0
+                    && offBoardPos.getCol() == ownExit.getCol()
+                    && offBoardPos.getRow() < 0;
+        };
     }
 
     private void validateOrientation(Vehicle vehicle, Direction direction) throws InvalidMoveException {
@@ -120,13 +179,12 @@ public class GameService {
         }
     }
 
-    private boolean isWithinBounds(BoardState state, Position pos) {
-        return pos.getRow() >= 0 && pos.getRow() < state.getRows()
-                && pos.getCol() >= 0 && pos.getCol() < state.getCols();
-    }
-
     /**
-     * Kigyűjti egy adott jármű összes érvényes elmozdulási állapotát az aktuális táblán.
+     * Összegyűjti az adott járműhöz tartozó összes érvényes új táblaállapotot.
+     *
+     * @param state     az aktuális táblaállapot
+     * @param vehicleId a jármű azonosítója
+     * @return az érvényes lépések utáni táblaállapotok listája
      */
     public List<BoardState> getValidMovesForVehicle(BoardState state, char vehicleId) {
         List<BoardState> validStates = new ArrayList<>();
@@ -140,34 +198,70 @@ public class GameService {
                 ? List.of(Direction.LEFT, Direction.RIGHT)
                 : List.of(Direction.UP, Direction.DOWN);
 
-        int maxDimension = Math.max(state.getRows(), state.getCols());
+        int maxSteps = state.getRows() + state.getCols();
+
         for (Direction dir : allowedDirections) {
-            for (int step = 1; step < maxDimension; step++) {
+            for (int step = 1; step <= maxSteps; step++) {
                 try {
-                    validStates.add(applyMove(state, vehicleId, dir, step));
+                    validStates.add(simulateMove(state, vehicleId, dir, step));
                 } catch (InvalidMoveException e) {
-                    break; // Ha 1 lépés nem szabad adott irányban, távolabbi sem lehet az
+                    break;
                 }
             }
         }
+
         return validStates;
     }
 
     /**
-     * Ellenőrzi, hogy a humán játékos ('A' céljármű) elérte-e a kijáratát.
+     * Ellenőrzi, hogy az 'A' céljármű kicsúszott-e a tábláról a saját 'exitA' kijáratán keresztül.
+     * A győzelem mindig a céljárműhöz és a saját kijáratához kötődik.
+     *
+     * @param state az aktuális táblaállapot
+     * @return {@code true}, ha a humán játékos céljárműve kijutott a saját kijáratán
      */
     public boolean isHumanWinner(BoardState state) {
-        return findVehicleById(state, HUMAN_HERO_ID)
-                .map(v -> v.getOccupiedPositions().contains(state.getExitA()))
-                .orElse(false);
+        return hasExitedThroughOwnExit(state, HUMAN_HERO_ID, state.getExitA());
     }
 
     /**
-     * Ellenőrzi, hogy a gépi játékos ('B' céljármű) elérte-e a kijáratát.
+     * Ellenőrzi, hogy a 'B' céljármű kicsúszott-e a tábláról a saját 'exitB' kijáratán keresztül.
+     * A győzelem mindig a céljárműhöz és a saját kijáratához kötődik.
+     *
+     * @param state az aktuális táblaállapot
+     * @return {@code true}, ha a gépi ellenfél céljárműve kijutott a saját kijáratán
      */
     public boolean isAiWinner(BoardState state) {
-        return findVehicleById(state, AI_HERO_ID)
-                .map(v -> v.getOccupiedPositions().contains(state.getExitB()))
+        return hasExitedThroughOwnExit(state, AI_HERO_ID, state.getExitB());
+    }
+
+    private boolean hasExitedThroughOwnExit(BoardState state, char heroId, Position ownExit) {
+        if (ownExit == null || !isWithinBounds(state, ownExit)) {
+            return false;
+        }
+        return findVehicleById(state, heroId)
+                .map(v -> v.getOccupiedPositions().stream().anyMatch(pos -> !isWithinBounds(state, pos))
+                        && isAlignedWithExit(state, v, ownExit))
                 .orElse(false);
+    }
+
+    private boolean isAlignedWithExit(BoardState state, Vehicle vehicle, Position exit) {
+        if (exit.getCol() == state.getCols() - 1 && vehicle.getOrientation() == Orientation.HORIZONTAL) {
+            return vehicle.getHeadPosition().getRow() == exit.getRow()
+                    && vehicle.getOccupiedPositions().stream().anyMatch(p -> p.getCol() >= state.getCols());
+        }
+        if (exit.getCol() == 0 && vehicle.getOrientation() == Orientation.HORIZONTAL) {
+            return vehicle.getHeadPosition().getRow() == exit.getRow()
+                    && vehicle.getOccupiedPositions().stream().anyMatch(p -> p.getCol() < 0);
+        }
+        if (exit.getRow() == state.getRows() - 1 && vehicle.getOrientation() == Orientation.VERTICAL) {
+            return vehicle.getHeadPosition().getCol() == exit.getCol()
+                    && vehicle.getOccupiedPositions().stream().anyMatch(p -> p.getRow() >= state.getRows());
+        }
+        if (exit.getRow() == 0 && vehicle.getOrientation() == Orientation.VERTICAL) {
+            return vehicle.getHeadPosition().getCol() == exit.getCol()
+                    && vehicle.getOccupiedPositions().stream().anyMatch(p -> p.getRow() < 0);
+        }
+        return false;
     }
 }

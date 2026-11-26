@@ -12,12 +12,13 @@ import hu.nye.progtech.rushhour.service.GameService;
 import java.io.File;
 import java.nio.file.Path;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Scanner;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * A parancssoros felhasználói interakciót és a játékmenetet vezérlő osztály.
+ * A parancssoros felhasználói felületet és játékciklust vezérlő osztály.
  */
 public class Game {
 
@@ -32,6 +33,15 @@ public class Game {
     private BoardState boardState;
     private String playerName;
 
+    /**
+     * Létrehozza a játékvezérlő példányt a szükséges függőségekkel.
+     *
+     * @param gameService         a játék üzleti logikája
+     * @param aiPlayerService     a gépi ellenfél szolgáltatása
+     * @param fileBoardRepository a fájl alapú pálya-perzisztencia
+     * @param highScoreRepository a high score perzisztencia
+     * @param scanner             a bemeneti olvasó
+     */
     public Game(GameService gameService,
                 AiPlayerService aiPlayerService,
                 FileBoardRepository fileBoardRepository,
@@ -45,7 +55,7 @@ public class Game {
     }
 
     /**
-     * Elindítja a játékot: betölti a kezdőpályát, bekéri a játékos nevét és futtatja a főciklust.
+     * Elindítja a játék főciklusát.
      */
     public void start() {
         LOGGER.info("Rush Hour NxM játék indítása...");
@@ -55,6 +65,11 @@ public class Game {
         System.out.println("       ÜDVÖZÖLLEK A RUSH HOUR NxM JÁTÉKBAN!         ");
         System.out.println("====================================================");
         System.out.print("Kérlek, add meg a neved: ");
+        if (!scanner.hasNextLine()) {
+            playerName = "Jatekos1";
+            System.out.println("\nBemenet lezárva (EOF), kilépés a játékból.");
+            return;
+        }
         playerName = scanner.nextLine().trim();
         if (playerName.isEmpty()) {
             playerName = "Jatekos1";
@@ -71,6 +86,11 @@ public class Game {
             }
 
             System.out.print("\n[" + playerName + "] Parancs > ");
+            if (!scanner.hasNextLine()) {
+                System.out.println("\nBemenet lezárva (EOF). Kilépés a játékból.");
+                break;
+            }
+
             String input = scanner.nextLine().trim();
             if (input.isEmpty()) {
                 continue;
@@ -104,9 +124,18 @@ public class Game {
                 System.out.println("Pálya sikeresen betöltve a(z) " + DEFAULT_INPUT_FILE + " fájlból.");
                 return;
             } catch (Exception e) {
-                LOGGER.warn("Nem sikerült betölteni a(z) {} fájlt, alapértelmezett pálya indul.", DEFAULT_INPUT_FILE, e);
+                LOGGER.warn("Nem sikerült betölteni a(z) {} fájlt, classpath/alapértelmezett pálya következik.",
+                        DEFAULT_INPUT_FILE, e);
             }
         }
+
+        Optional<BoardState> classpathBoard = fileBoardRepository.loadDefaultFromClasspath();
+        if (classpathBoard.isPresent()) {
+            boardState = classpathBoard.get();
+            System.out.println("Pálya sikeresen betöltve a classpath-ról (board.txt).");
+            return;
+        }
+
         boardState = gameService.createDefaultBoard();
     }
 
@@ -115,6 +144,7 @@ public class Game {
             System.out.println("Használat: move <jármű_id> <up|down|left|right> <lépésszám> (pl.: move C down 2)");
             return;
         }
+
         try {
             char vehicleId = parts[1].charAt(0);
             Direction dir = Direction.valueOf(parts[2].toUpperCase());
@@ -123,13 +153,13 @@ public class Game {
             boardState = gameService.applyMove(boardState, vehicleId, dir, steps);
             System.out.println("Sikeres lépés!");
 
-            if (checkWinConditions()) {
-                printBoard();
-                System.exit(0);
+            if (gameService.isHumanWinner(boardState)) {
+                return;
             }
 
             System.out.println("A gépi ellenfél (AI) lép...");
             boardState = aiPlayerService.makeRandomMove(boardState);
+
         } catch (IllegalArgumentException e) {
             System.out.println("Hibás irány vagy lépésszám! Irányok: UP, DOWN, LEFT, RIGHT.");
         } catch (InvalidMoveException e) {
@@ -146,6 +176,7 @@ public class Game {
             printHighScores();
             return true;
         }
+
         if (gameService.isAiWinner(boardState)) {
             System.out.println("\n****************************************************");
             System.out.println(" A GÉPI JÁTÉKOS (AI) kijutott a 'B' járművel! Vesztettél.");
@@ -154,60 +185,72 @@ public class Game {
             printHighScores();
             return true;
         }
+
         return false;
     }
 
     private void handleSaveTxt(String[] parts) {
-        String fileName = parts.length > 1 ? parts[1] : "saved_board.txt";
+        String filename = parts.length >= 2 ? parts[1] : "saved_board.txt";
         try {
-            fileBoardRepository.saveToTxt(boardState, Path.of(fileName));
-            System.out.println("Pálya sikeresen kimentve ide: " + fileName);
+            fileBoardRepository.saveToTxt(boardState, Path.of(filename));
+            System.out.println("Pálya elmentve a(z) " + filename + " fájlba.");
         } catch (Exception e) {
-            System.out.println("Hiba a mentés során: " + e.getMessage());
+            LOGGER.error("Hiba TXT mentéskor", e);
+            System.out.println("Hiba történt a mentés során: " + e.getMessage());
         }
     }
 
     private void handleLoadTxt(String[] parts) {
-        String fileName = parts.length > 1 ? parts[1] : "saved_board.txt";
+        if (parts.length < 2) {
+            System.out.println("Használat: load <fájlnév.txt>");
+            return;
+        }
         try {
-            boardState = fileBoardRepository.loadFromTxt(Path.of(fileName));
-            System.out.println("Pálya sikeresen betöltve innen: " + fileName);
+            boardState = fileBoardRepository.loadFromTxt(Path.of(parts[1]));
+            System.out.println("Pálya sikeresen betöltve a(z) " + parts[1] + " fájlból.");
         } catch (Exception e) {
-            System.out.println("Hiba a betöltés során: " + e.getMessage());
+            LOGGER.error("Hiba TXT betöltéskor", e);
+            System.out.println("Hiba történt a betöltés során: " + e.getMessage());
         }
     }
 
     private void handleSaveXml(String[] parts) {
-        String fileName = parts.length > 1 ? parts[1] : "saved_game.xml";
+        String filename = parts.length >= 2 ? parts[1] : "saved_game.xml";
         try {
-            fileBoardRepository.saveToXml(boardState, Path.of(fileName));
-            System.out.println("Játékállás sikeresen kimentve XML-be: " + fileName);
+            fileBoardRepository.saveToXml(boardState, Path.of(filename));
+            System.out.println("Játékállás elmentve XML formátumban: " + filename);
         } catch (Exception e) {
-            System.out.println("Hiba az XML mentés során: " + e.getMessage());
+            LOGGER.error("Hiba XML mentéskor", e);
+            System.out.println("Hiba történt az XML mentés során: " + e.getMessage());
         }
     }
 
     private void handleLoadXml(String[] parts) {
-        String fileName = parts.length > 1 ? parts[1] : "saved_game.xml";
+        if (parts.length < 2) {
+            System.out.println("Használat: loadxml <fájlnév.xml>");
+            return;
+        }
         try {
-            boardState = fileBoardRepository.loadFromXml(Path.of(fileName));
-            System.out.println("Játékállás sikeresen visszatöltve XML-ből: " + fileName);
+            boardState = fileBoardRepository.loadFromXml(Path.of(parts[1]));
+            System.out.println("Játékállás sikeresen visszatöltve XML fájlból: " + parts[1]);
         } catch (Exception e) {
-            System.out.println("Hiba az XML betöltés során: " + e.getMessage());
+            LOGGER.error("Hiba XML betöltéskor", e);
+            System.out.println("Hiba történt az XML betöltés során: " + e.getMessage());
         }
     }
 
     private void printHighScores() {
-        System.out.println("\n================ HIGH SCORE TÁBLÁZAT ================");
         Map<String, Integer> scores = highScoreRepository.getHighScores();
+        System.out.println("\n--- HIGH SCORE RANGLISTA ---");
         if (scores.isEmpty()) {
-            System.out.println("Még nincs rögzített győzelem az adatbázisban.");
+            System.out.println("Még nincs rögzített győzelem.");
         } else {
-            System.out.printf("%-25s | %s%n", "Játékos neve", "Győzelmek száma");
-            System.out.println("-----------------------------------------------------");
-            scores.forEach((name, wins) -> System.out.printf("%-25s | %d%n", name, wins));
+            int rank = 1;
+            for (Map.Entry<String, Integer> entry : scores.entrySet()) {
+                System.out.printf("%d. %-20s %d győzelem%n", rank++, entry.getKey(), entry.getValue());
+            }
         }
-        System.out.println("=====================================================");
+        System.out.println("----------------------------");
     }
 
     private void printBoard() {
@@ -220,7 +263,9 @@ public class Game {
 
         for (Vehicle v : boardState.getVehicles()) {
             for (Position pos : v.getOccupiedPositions()) {
-                grid[pos.getRow()][pos.getCol()] = v.getId();
+                if (gameService.isWithinBounds(boardState, pos)) {
+                    grid[pos.getRow()][pos.getCol()] = v.getId();
+                }
             }
         }
 

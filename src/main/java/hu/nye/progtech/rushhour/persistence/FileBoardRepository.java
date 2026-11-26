@@ -77,7 +77,7 @@ public class FileBoardRepository {
             writer.newLine();
             writer.write(state.getExitB().getRow() + " " + state.getExitB().getCol());
             writer.newLine();
-            writer.write(state.getVehicles().size());
+            writer.write(state.getVehicles().size() + "");
             writer.newLine();
             for (Vehicle vehicle : state.getVehicles()) {
                 writer.write(vehicle.getId()
@@ -262,31 +262,32 @@ public class FileBoardRepository {
         Position exitA = parsePositionLine(nextNonBlankLine(reader), "exitA");
         Position exitB = parsePositionLine(nextNonBlankLine(reader), "exitB");
 
-        String countLine = nextNonBlankLine(reader);
-        if (countLine == null) {
-            throw new IllegalArgumentException("Hiányzik a járművek darabszáma.");
-        }
-        int vehicleCount = Integer.parseInt(countLine.trim());
-        if (vehicleCount < 0) {
-            throw new IllegalArgumentException("A járművek darabszáma nem lehet negatív.");
+        String nextLine = nextNonBlankLine(reader);
+        if (nextLine == null) {
+            throw new IllegalArgumentException("Hiányzik a járművek darabszáma vagy a járműsor.");
         }
 
         List<Vehicle> vehicles = new ArrayList<>();
-        for (int i = 0; i < vehicleCount; i++) {
-            String line = nextNonBlankLine(reader);
-            if (line == null) {
-                throw new IllegalArgumentException("Kevesebb járműsor található a várt " + vehicleCount + " darabnál.");
+        String[] nextParts = nextLine.trim().split("\\s+");
+
+        if (nextParts.length == 1) {
+            int vehicleCount = Integer.parseInt(nextParts[0]);
+            if (vehicleCount < 0) {
+                throw new IllegalArgumentException("A járművek darabszáma nem lehet negatív.");
             }
-            String[] parts = line.trim().split("\\s+");
-            if (parts.length != 5 || parts[0].length() != 1) {
-                throw new IllegalArgumentException("Érvénytelen járműsor: " + line);
+            for (int i = 0; i < vehicleCount; i++) {
+                String line = nextNonBlankLine(reader);
+                if (line == null) {
+                    throw new IllegalArgumentException("Kevesebb járműsor található a várt " + vehicleCount + " darabnál.");
+                }
+                vehicles.add(parseVehicleLine(line));
             }
-            char id = parts[0].charAt(0);
-            int row = Integer.parseInt(parts[1]);
-            int col = Integer.parseInt(parts[2]);
-            int length = Integer.parseInt(parts[3]);
-            Orientation orientation = Orientation.valueOf(parts[4].toUpperCase());
-            vehicles.add(new Vehicle(id, new Position(row, col), length, orientation));
+        } else {
+            vehicles.add(parseVehicleLine(nextLine));
+            String line;
+            while ((line = nextNonBlankLine(reader)) != null) {
+                vehicles.add(parseVehicleLine(line));
+            }
         }
 
         return BoardState.builder()
@@ -295,6 +296,19 @@ public class FileBoardRepository {
                 .withExitB(exitB)
                 .withVehicles(vehicles)
                 .build();
+    }
+
+    private Vehicle parseVehicleLine(String line) {
+        String[] parts = line.trim().split("\\s+");
+        if (parts.length != 5 || parts[0].length() != 1) {
+            throw new IllegalArgumentException("Érvénytelen járműsor: " + line);
+        }
+        char id = parts[0].charAt(0);
+        int row = Integer.parseInt(parts[1]);
+        int col = Integer.parseInt(parts[2]);
+        int length = Integer.parseInt(parts[3]);
+        Orientation orientation = Orientation.valueOf(parts[4].toUpperCase());
+        return new Vehicle(id, new Position(row, col), length, orientation);
     }
 
     private String nextNonBlankLine(BufferedReader reader) throws IOException {

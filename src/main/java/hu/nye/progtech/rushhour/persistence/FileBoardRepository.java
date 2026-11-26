@@ -77,7 +77,7 @@ public class FileBoardRepository {
             writer.newLine();
             writer.write(state.getExitB().getRow() + " " + state.getExitB().getCol());
             writer.newLine();
-            writer.write(Integer.toString(state.getVehicles().size()));
+            writer.write(String.valueOf(state.getVehicles().size()));
             writer.newLine();
             for (Vehicle vehicle : state.getVehicles()) {
                 writer.write(vehicle.getId()
@@ -177,7 +177,7 @@ public class FileBoardRepository {
         for (int i = 0; i < vehicleNodes.getLength(); i++) {
             Element vEl = (Element) vehicleNodes.item(i);
             String idStr = vEl.getAttribute("id");
-            if (idStr == null || idStr.isEmpty()) {
+            if (idStr.isEmpty()) {
                 throw new IllegalArgumentException("Hiányzó jármű azonosító az XML fájlban.");
             }
             char id = idStr.charAt(0);
@@ -320,7 +320,7 @@ public class FileBoardRepository {
     }
 
     private void validateExit(Position exit, int rows, int cols, String label) {
-        if (exit == null || !isWithinBounds(exit, rows, cols)) {
+        if (exit == null || isOutsideBounds(exit, rows, cols)) {
             throw new IllegalArgumentException("A(z) " + label + " kijárat a táblán kívül van: " + exit);
         }
         boolean onEdge = exit.getRow() == 0
@@ -333,7 +333,11 @@ public class FileBoardRepository {
     }
 
     private boolean isWithinBounds(Position pos, int rows, int cols) {
-        return pos.getRow() >= 0 && pos.getRow() < rows
-                && pos.getCol() >= 0 && pos.getCol() < cols;
+        return !isOutsideBounds(pos, rows, cols);
+    }
+
+    private boolean isOutsideBounds(Position pos, int rows, int cols) {
+        return pos.getRow() < 0 || pos.getRow() >= rows
+                || pos.getCol() < 0 || pos.getCol() >= cols;
     }
 }

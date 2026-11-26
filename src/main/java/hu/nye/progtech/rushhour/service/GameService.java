@@ -148,7 +148,7 @@ public class GameService {
             return false;
         }
 
-        if (ownExit == null || !isWithinBounds(state, ownExit)) {
+        if (!isWithinBounds(state, ownExit)) {
             return false;
         }
 
@@ -236,7 +236,7 @@ public class GameService {
     }
 
     private boolean hasExitedThroughOwnExit(BoardState state, char heroId, Position ownExit) {
-        if (ownExit == null || !isWithinBounds(state, ownExit)) {
+        if (!isWithinBounds(state, ownExit)) {
             return false;
         }
         return findVehicleById(state, heroId)
